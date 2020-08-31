@@ -13,8 +13,9 @@
     <IsProjectReferenceProvider>false</IsProjectReferenceProvider>
 
     <!--
-      This project compiles against Microsoft.AspNetCore.App from the SDK.
-      This ensures that it's packaging output is correct and does not include local artifacts.
+      Act as if this project will compile against the Microsoft.AspNetCore.App from the SDK. This ensures that its
+      packaging output is correct and does not include local artifacts. But, see last-minute fixup in the
+      _UpdateSharedFrameworkAssemblies.target.
     -->
     <UseAspNetCoreSharedRuntime>true</UseAspNetCoreSharedRuntime>
     <DoNotApplyWorkaroundsToMicrosoftAspNetCoreApp>true</DoNotApplyWorkaroundsToMicrosoftAspNetCoreApp>
@@ -23,11 +24,12 @@
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
 
-    <ProjectReference
-      Include="$(RepoRoot)src\Framework\App.Runtime\src\Microsoft.AspNetCore.App.Runtime.csproj"
-      PrivateAssets="All"
-      ReferenceOutputAssembly="false"
-      SkipGetTargetFrameworkProperties="true" />
+    <!-- Ensure "just been built" is correct. -->
+    <ProjectReference Include="$(RepoRoot)src\Framework\App.Ref\src\Microsoft.AspNetCore.App.Ref.csproj"
+        Condition=" $(IsTargetingPackBuilding) "
+        PrivateAssets="All"
+        ReferenceOutputAssembly="false"
+        SkipGetTargetFrameworkProperties="true" />
 
     <Reference Include="Microsoft.AspNetCore.Components.WebAssembly.Server" />
     <Compile Include="$(SharedSourceRoot)CommandLineUtils\**\*.cs" />
@@ -45,5 +47,31 @@
     <NuspecProperty Include="PackageThirdPartyNoticesFile=$(PackageThirdPartyNoticesFile)" />
   </ItemGroup>
 
-
+  <!--
+    As versioning changes, cannot compile against both the ASP.NET runtime / ref assemblies in the SDK e.g. a 5.0 SDK
+    and Microsoft.AspNetCore.Components.WebAssembly.Server (which would be 6.0 in this example). Ensure we build using
+    the targeting pack that's just been built.
+  -->
+  <Target Name="_UpdateSharedFrameworkAssemblies"
+      AfterTargets="ResolveFrameworkReferences"
+      BeforeTargets="ResolveTargetingPackAssets;_PrepareForReadyToRunCompilation;ResolveFrameworkReferencesDesignTime;_WarnAboutRedundantRef"
+      Condition=" $(IsTargetingPackBuilding) "
+      DependsOnTargets="ResolveFrameworkReferences">
+    <PropertyGroup>
+      <_PreviousTargetingPackVersion>@(ResolvedTargetingPack->WithMetadataValue('Identity', 'Microsoft.AspNetCore.App')->'%(NuGetPackageVersion)')</_PreviousTargetingPackVersion>
+      <_PreviousTargetingPackPath>@(ResolvedTargetingPack->WithMetadataValue('Identity', 'Microsoft.AspNetCore.App')->'%(PackageDirectory)')</_PreviousTargetingPackPath>
+      <_NewTargetingPackPath>$(_PreviousTargetingPackPath.Replace('$(_PreviousTargetingPackVersion)', '$(TargetingPackVersion)'))</_NewTargetingPackPath>
+    </PropertyGroup>
+    <ItemGroup Condition=" EXISTS('$(_NewTargetingPackPath)') ">
+      <ResolvedFrameworkReference Condition=" '%(Identity)' == 'Microsoft.AspNetCore.App' ">
+        <TargetingPackVersion>$(TargetingPackVersion)</TargetingPackVersion>
+        <TargetingPackPath>$(_NewTargetingPackPath)</TargetingPackPath>
+      </ResolvedFrameworkReference>
+      <ResolvedTargetingPack Condition=" '%(Identity)' == 'Microsoft.AspNetCore.App' ">
+        <NuGetPackageVersion>$(TargetingPackVersion)</NuGetPackageVersion>
+        <PackageDirectory>$(_NewTargetingPackPath)</PackageDirectory>
+        <Path>$(_NewTargetingPackPath)</Path>
+      </ResolvedTargetingPack>
+    </ItemGroup>
+  </Target>
 </Project>
